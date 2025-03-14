@@ -60,6 +60,7 @@ fn resources_test_case() -> Resources {
         read_operations: 12,
         write_operations: 2,
         storage_size_delta: 700_000_000,
+        http_requests: 3,
     }
 }
 

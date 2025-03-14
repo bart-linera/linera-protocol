@@ -288,6 +288,8 @@ pub struct Resources {
     pub message_size: u32,
     /// An increase in the amount of storage space.
     pub storage_size_delta: u32,
+    /// A number of HTTP requests to be performed.
+    pub http_requests: u32,
     // TODO(#1532): Account for the system calls that we plan on calling.
     // TODO(#1533): Allow declaring calls to other applications instead of having to count them here.
 }
@@ -736,6 +738,10 @@ pub struct ApplicationPermissions {
     #[graphql(default)]
     #[debug(skip_if = Option::is_none)]
     pub call_service_as_oracle: Option<Vec<ApplicationId>>,
+    /// These applications are allowed to perform HTTP requests.
+    #[graphql(default)]
+    #[debug(skip_if = Option::is_none)]
+    pub make_http_requests: Option<Vec<ApplicationId>>,
 }
 
 impl ApplicationPermissions {
@@ -748,6 +754,7 @@ impl ApplicationPermissions {
             close_chain: vec![app_id],
             change_application_permissions: vec![app_id],
             call_service_as_oracle: Some(vec![app_id]),
+            make_http_requests: Some(vec![app_id]),
         }
     }
 
@@ -774,6 +781,14 @@ impl ApplicationPermissions {
     /// Returns whether the given application can call services.
     pub fn can_call_services(&self, app_id: &ApplicationId) -> bool {
         self.call_service_as_oracle
+            .as_ref()
+            .map(|app_ids| app_ids.contains(app_id))
+            .unwrap_or(true)
+    }
+
+    /// Returns whether the given application can make HTTP requests.
+    pub fn can_make_http_requests(&self, app_id: &ApplicationId) -> bool {
+        self.make_http_requests
             .as_ref()
             .map(|app_ids| app_ids.contains(app_id))
             .unwrap_or(true)

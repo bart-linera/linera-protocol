@@ -102,6 +102,11 @@ pub struct SyncRuntimeInternal<UserInstance> {
     /// Track application states based on views.
     view_user_states: BTreeMap<UserApplicationId, ViewUserState>,
 
+    /// The deadline this runtime should finish executing.
+    ///
+    /// Used to limit the execution time of services running as oracles.
+    deadline: Option<Instant>,
+
     /// Where to send a refund for the unused part of the grant after execution, if any.
     #[debug(skip_if = Option::is_none)]
     refund_grant_to: Option<Account>,
@@ -292,6 +297,7 @@ impl<UserInstance> SyncRuntimeInternal<UserInstance> {
         authenticated_signer: Option<Owner>,
         executing_message: Option<ExecutingMessage>,
         execution_state_sender: ExecutionStateSender,
+        deadline: Option<Instant>,
         refund_grant_to: Option<Account>,
         resource_controller: ResourceController,
         transaction_tracker: TransactionTracker,
@@ -310,6 +316,7 @@ impl<UserInstance> SyncRuntimeInternal<UserInstance> {
             call_stack: Vec::new(),
             active_applications: HashSet::new(),
             view_user_states: BTreeMap::new(),
+            deadline,
             refund_grant_to,
             resource_controller,
             transaction_tracker,
@@ -477,14 +484,16 @@ impl SyncRuntimeInternal<UserContractInstance> {
 
         let txn_tracker = TransactionTracker::default()
             .with_blobs(self.transaction_tracker.created_blobs().clone());
-        let mut service_runtime =
-            ServiceSyncRuntime::new_with_txn_tracker(sender, context, txn_tracker);
 
-        // TODO(#3533): Use the timeout to limit execution time.
-        let _timeout = self
+        let timeout = self
             .resource_controller
             .remaining_service_oracle_execution_time()?;
         let execution_start = Instant::now();
+        let deadline = Some(execution_start + timeout);
+
+        let mut service_runtime =
+            ServiceSyncRuntime::new_with_txn_tracker(sender, context, deadline, txn_tracker);
+
         let result = service_runtime.run_query(application_id, query);
 
         // Always track the execution time, irrespective to whether the service ran successfully or
@@ -951,10 +960,19 @@ impl<UserInstance> BaseRuntime for SyncRuntimeInternal<UserInstance> {
         &mut self,
         request: http::Request,
     ) -> Result<http::Response, ExecutionError> {
+        let app_permissions = self
+            .execution_state_sender
+            .send_request(|callback| ExecutionRequest::GetApplicationPermissions { callback })?
+            .recv_response()?;
+
+        let app_id = self.current_application().id;
         ensure!(
-            cfg!(feature = "unstable-oracles"),
-            ExecutionError::UnstableOracle
+            app_permissions.can_make_http_requests(&app_id),
+            ExecutionError::UnauthorizedApplication(app_id)
         );
+
+        self.resource_controller.track_http_request()?;
+
         let response =
             if let Some(response) = self.transaction_tracker.next_replayed_oracle_response()? {
                 match response {
@@ -1049,6 +1067,7 @@ impl ContractSyncRuntime {
                     None
                 },
                 execution_state_sender,
+                None,
                 refund_grant_to,
                 resource_controller,
                 txn_tracker,
@@ -1554,6 +1573,7 @@ impl ServiceSyncRuntime {
         Self::new_with_txn_tracker(
             execution_state_sender,
             context,
+            None,
             TransactionTracker::default(),
         )
     }
@@ -1562,6 +1582,7 @@ impl ServiceSyncRuntime {
     pub fn new_with_txn_tracker(
         execution_state_sender: ExecutionStateSender,
         context: QueryContext,
+        deadline: Option<Instant>,
         txn_tracker: TransactionTracker,
     ) -> Self {
         let runtime = SyncRuntime(Some(
@@ -1573,6 +1594,7 @@ impl ServiceSyncRuntime {
                 None,
                 None,
                 execution_state_sender,
+                deadline,
                 None,
                 ResourceController::default(),
                 txn_tracker,
@@ -1710,6 +1732,15 @@ impl ServiceRuntime for ServiceSyncRuntimeHandle {
             bytes: operation,
         });
 
+        Ok(())
+    }
+
+    fn check_execution_time(&mut self) -> Result<(), ExecutionError> {
+        if let Some(deadline) = self.inner().deadline {
+            if Instant::now() >= deadline {
+                return Err(ExecutionError::MaximumServiceOracleExecutionTimeExceeded);
+            }
+        }
         Ok(())
     }
 }
