@@ -531,7 +531,7 @@ pub enum ClientCommand {
         #[arg(long)]
         byte_written: Option<Amount>,
 
-        /// Set he price to read a blob, per byte.
+        /// Set the price to read a blob, per byte.
         #[arg(long)]
         blob_byte_read: Option<Amount>,
 
@@ -699,7 +699,7 @@ pub enum ClientCommand {
         #[arg(long)]
         byte_written_price: Option<Amount>,
 
-        /// Set he price to read a blob, per byte.
+        /// Set the price to read a blob, per byte.
         /// (This will overwrite value from `--policy-config`)
         #[arg(long)]
         blob_byte_read_price: Option<Amount>,
