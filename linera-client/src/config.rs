@@ -13,7 +13,10 @@ use linera_base::{
         AccountPublicKey, BcsSignable, CryptoHash, InMemorySigner, ValidatorPublicKey,
         ValidatorSecretKey,
     },
-    data_types::{Amount, ChainDescription, ChainOrigin, Epoch, InitialChainConfig, Timestamp},
+    data_types::{
+        Amount, ChainDescription, ChainOrigin, Epoch, InitialChainConfig, NetworkDescription,
+        Timestamp,
+    },
     identifiers::ChainId,
     ownership::ChainOwnership,
 };
@@ -24,7 +27,7 @@ use linera_execution::{
 use linera_rpc::config::{
     ExporterServiceConfig, ValidatorInternalNetworkConfig, ValidatorPublicNetworkConfig,
 };
-use linera_storage::{NetworkDescription, Storage};
+use linera_storage::Storage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +40,8 @@ pub enum Error {
     Persistence(Box<dyn std::error::Error + Send + Sync>),
     #[error("storage is already initialized: {0:?}")]
     StorageIsAlreadyInitialized(NetworkDescription),
+    #[error("no admin chain configured")]
+    NoAdminChain,
 }
 
 use crate::{
@@ -300,14 +305,10 @@ impl GenesisConfig {
         )]
         .into_iter()
         .collect();
+        let mut admin_chain_id = None;
         for (chain_number, (public_key, balance)) in (0..).zip(&self.chains) {
             let origin = ChainOrigin::Root(chain_number);
             let config = InitialChainConfig {
-                admin_id: if chain_number == 0 {
-                    None
-                } else {
-                    Some(self.admin_id)
-                },
                 application_permissions: Default::default(),
                 balance: *balance,
                 committees: committees.clone(),
@@ -315,12 +316,16 @@ impl GenesisConfig {
                 ownership: ChainOwnership::single((*public_key).into()),
             };
             let description = ChainDescription::new(origin, config, self.timestamp);
+            if chain_number == 0 {
+                admin_chain_id = Some(description.id());
+            }
             storage.create_chain(description).await?;
         }
         let network_description = NetworkDescription {
             name: self.network_name.clone(),
             genesis_config_hash: CryptoHash::new(self),
             genesis_timestamp: self.timestamp,
+            admin_chain_id: admin_chain_id.ok_or(Error::NoAdminChain)?,
         };
         storage
             .write_network_description(&network_description)
@@ -337,12 +342,30 @@ impl GenesisConfig {
         CryptoHash::new(self)
     }
 
-    pub fn network_description(&self) -> NetworkDescription {
-        NetworkDescription {
+    pub fn network_description(&self) -> Result<NetworkDescription, Error> {
+        let committee = self.create_committee();
+        let committees: BTreeMap<_, _> = [(
+            Epoch::ZERO,
+            bcs::to_bytes(&committee).expect("serializing a committee should not fail"),
+        )]
+        .into_iter()
+        .collect();
+        let origin = ChainOrigin::Root(0);
+        let (public_key, balance) = self.chains.get(0).ok_or(Error::NoAdminChain)?;
+        let config = InitialChainConfig {
+            application_permissions: Default::default(),
+            balance: *balance,
+            committees: committees.clone(),
+            epoch: Epoch::ZERO,
+            ownership: ChainOwnership::single((*public_key).into()),
+        };
+        let admin_chain_id = ChainDescription::new(origin, config, self.timestamp).id();
+        Ok(NetworkDescription {
             name: self.network_name.clone(),
             genesis_config_hash: CryptoHash::new(self),
             genesis_timestamp: self.timestamp,
-        }
+            admin_chain_id,
+        })
     }
 }
 

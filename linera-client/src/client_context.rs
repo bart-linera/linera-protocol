@@ -570,7 +570,14 @@ where
         address: &str,
         node: &impl ValidatorNode,
     ) -> Result<CryptoHash, Error> {
-        let network_description = self.wallet().genesis_config().network_description();
+        let network_description = self
+            .wallet()
+            .genesis_config()
+            .network_description()
+            .map_err(|err| error::Inner::UnavailableNetworkDescription {
+                address: "local node".into(),
+                error: Box::new(err),
+            })?;
         match node.get_network_description().await {
             Ok(description) => {
                 if description == network_description {
