@@ -410,6 +410,7 @@ where
             else {
                 break;
             };
+            error!("Downloaded {} certificates", certificates.len());
             let Some(info) = self
                 .try_process_certificates(remote_node, chain_id, certificates)
                 .await
