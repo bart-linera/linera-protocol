@@ -189,6 +189,7 @@ where
                     .insert(Cow::Borrowed(vote.value.inner()));
             }
             Some(Either::Right(vote)) => {
+                debug!(value=?vote.value.inner(), "voted for block proposal");
                 self.state
                     .block_values
                     .insert(Cow::Borrowed(vote.value.inner()));

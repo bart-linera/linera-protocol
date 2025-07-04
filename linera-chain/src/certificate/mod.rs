@@ -92,7 +92,7 @@ pub enum CertificateKind {
     Confirmed = 2,
 }
 
-pub trait CertificateValue: Clone {
+pub trait CertificateValue: Clone + std::fmt::Debug {
     const KIND: CertificateKind;
 
     fn chain_id(&self) -> ChainId;

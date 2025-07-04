@@ -632,6 +632,9 @@ impl<Env: Environment> Client<Env> {
             self.options.grace_period,
         )
         .await?;
+        if votes_hash != value.hash() {
+            debug!(?value, "unexpected value hash quorum");
+        }
         ensure!(
             (votes_hash, votes_round) == (value.hash(), action.round()),
             ChainClientError::UnexpectedQuorum {
