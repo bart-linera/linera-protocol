@@ -817,11 +817,11 @@ impl Runnable for Job {
                     delay_between_chains_ms,
                     chains_config_path,
                 } = benchmark_config;
-                assert!(
-                    options.context_options.max_pending_message_bundles >= transactions_per_block,
-                    "max_pending_message_bundles must be set to at least the same as the \
-                     number of transactions per block ({transactions_per_block}) for benchmarking",
-                );
+                // assert!(
+                //     options.context_options.max_pending_message_bundles >= transactions_per_block,
+                //     "max_pending_message_bundles must be set to at least the same as the \
+                //      number of transactions per block ({transactions_per_block}) for benchmarking",
+                // );
                 assert!(
                     num_chains > 0,
                     "Number of chain groups must be greater than 0"

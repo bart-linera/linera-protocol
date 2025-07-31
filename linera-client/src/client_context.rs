@@ -836,6 +836,7 @@ where
         let mut chains_found_in_wallet = 0;
         let mut benchmark_chains = Vec::with_capacity(num_chains);
         let mut chain_clients = Vec::with_capacity(num_chains);
+        info!("Local chains are:");
         let start = Instant::now();
         for chain_id in self.wallet.owned_chain_ids() {
             if chains_found_in_wallet == num_chains {
@@ -853,6 +854,7 @@ where
             if !ownership.owners.is_empty() || ownership.super_owners.len() != 1 {
                 continue;
             }
+            info!("{chain_id}");
             chain_client.process_inbox().await?;
             benchmark_chains.push((chain_id, owner));
             chain_clients.push(chain_client);

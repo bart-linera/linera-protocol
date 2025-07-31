@@ -26,6 +26,7 @@ use linera_chain::{
 use linera_execution::committee::Committee;
 use linera_storage::{ResultReadCertificates, Storage};
 use thiserror::Error;
+use tracing::info;
 
 use crate::{
     client::ChainClientError,
@@ -288,6 +289,7 @@ where
             {
                 Ok(info) => return Ok(info),
                 Err(NodeError::MissingCrossChainUpdate { .. }) if !sent_cross_chain_updates => {
+                    info!("Missing cross chain update when trying to send block proposal to chain {chain_id:8}, sending chain information for senders");
                     sent_cross_chain_updates = true;
                     // Some received certificates may be missing for this validator
                     // (e.g. to create the chain or make the balance sufficient) so we are going to
@@ -525,7 +527,10 @@ where
                 vote.check()?;
                 Ok(vote)
             }
-            Some(_) | None => Err(NodeError::MissingVoteInValidatorResponse.into()),
+            Some(_) | None => {
+                info!("Invalid vote: {:?}", vote);
+                Err(NodeError::MissingVoteInValidatorResponse.into())
+            }
         }
     }
 }

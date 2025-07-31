@@ -1760,7 +1760,7 @@ impl<Env: Environment> ChainClient<Env> {
     /// Obtains up to `self.options.max_pending_message_bundles` pending message bundles for the
     /// local chain.
     #[instrument(level = "trace")]
-    pub async fn pending_message_bundles(&self) -> Result<Vec<IncomingBundle>, ChainClientError> {
+    async fn pending_message_bundles(&self) -> Result<Vec<IncomingBundle>, ChainClientError> {
         if self.options.message_policy.is_ignore() {
             // Ignore all messages.
             return Ok(Vec::new());

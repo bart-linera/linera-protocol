@@ -203,11 +203,11 @@ impl<Env: Environment> Benchmark<Env> {
                 return Err(e);
             }
         }
+        info!("All benchmark tasks completed successfully");
 
         let metrics_watcher =
             Self::metrics_watcher(health_check_endpoints, shutdown_notifier).await?;
 
-        info!("All benchmark tasks completed");
         bps_control_task.await?;
         if let Some(metrics_watcher) = metrics_watcher {
             metrics_watcher.await??;
@@ -580,6 +580,7 @@ impl<Env: Environment> Benchmark<Env> {
         }
 
         loop {
+            info!("Executing operations for chain {:?}", chain_id);
             if shutdown_notifier.is_cancelled() {
                 info!("Shutdown signal received, stopping benchmark");
                 break;
@@ -590,6 +591,13 @@ impl<Env: Environment> Benchmark<Env> {
                 .await
                 .map_err(BenchmarkError::ChainClient)?
                 .expect("should execute block with operations");
+            // if let Err(e) = chain_client
+            //     .execute_operations(operations.clone(), vec![])
+            //     .await
+            // {
+            //     error!("Got error while trying to execute operations: {e}");
+            //     continue;
+            // }
 
             let current_bps_count = bps_count.fetch_add(1, Ordering::Relaxed) + 1;
             if current_bps_count >= bps {

@@ -210,6 +210,11 @@ impl<C: ClientContext> ChainListener<C> {
             chain_ids
         };
         self.listen_recursively(chain_ids).await?;
+        info!(
+            "After listen_recursively, have {} chains: {:?}",
+            self.listening.len(),
+            self.listening.keys()
+        );
         loop {
             match self.next_action().await? {
                 Action::ProcessInbox(chain_id) => self.maybe_process_inbox(chain_id).await?,
