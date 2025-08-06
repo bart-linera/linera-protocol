@@ -6,7 +6,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, parse_quote, ItemStruct, Type};
+use syn::{parse_macro_input, parse_quote, Ident, ItemStruct, Type};
 
 #[derive(Debug, deluxe::ParseAttributes)]
 #[deluxe(attributes(view))]
@@ -47,6 +47,15 @@ fn get_extended_entry(e: Type) -> TokenStream2 {
     quote! { #ident :: #arguments }
 }
 
+fn is_debug_id(field: &syn::Field) -> bool {
+    field.attrs.iter().any(|attr| {
+        attr.path().is_ident("view")
+            && attr
+                .parse_args::<Ident>()
+                .is_ok_and(|arg| arg == "debug_id")
+    })
+}
+
 fn generate_view_code(input: ItemStruct, root: bool) -> TokenStream2 {
     let Constraints {
         input_constraints,
@@ -66,7 +75,12 @@ fn generate_view_code(input: ItemStruct, root: bool) -> TokenStream2 {
     });
 
     let struct_name = &input.ident;
-    let field_types: Vec<_> = input.fields.iter().map(|field| &field.ty).collect();
+    let field_types: Vec<_> = input
+        .fields
+        .iter()
+        .filter(|f| !is_debug_id(f))
+        .map(|field| &field.ty)
+        .collect();
 
     let mut name_quotes = Vec::new();
     let mut rollback_quotes = Vec::new();
@@ -77,12 +91,44 @@ fn generate_view_code(input: ItemStruct, root: bool) -> TokenStream2 {
     let mut num_init_keys_quotes = Vec::new();
     let mut pre_load_keys_quotes = Vec::new();
     let mut post_load_keys_quotes = Vec::new();
+    let mut debug_id_quotes = Vec::new();
+    let mut drop_quotes = Vec::new();
+    let mut add_context_constraints = Vec::new();
     for (idx, e) in input.fields.iter().enumerate() {
         let name = e.ident.clone().unwrap();
+        name_quotes.push(quote! { #name });
+        if is_debug_id(e) {
+            add_context_constraints.push(quote! {
+                #context::Extra: ExecutionRuntimeContext
+            });
+            post_load_keys_quotes.push(quote! {
+                use linera_views::rand::Rng;
+                let mut rng = linera_views::rand::thread_rng();
+                let #name = rng.gen();
+                tracing::debug!("loading view {} debug_id={} chain_id={}", stringify!(#struct_name), #name, context.extra().chain_id());
+            });
+            debug_id_quotes.push(quote! {
+                fn debug_id(&self) -> Option<usize> {
+                    Some(self.#name)
+                }
+            });
+            drop_quotes.push(quote! {
+                impl #impl_generics Drop for #struct_name #type_generics
+                where
+                    #context: linera_views::context::Context,
+                    #(#input_constraints,)*
+                    #(#field_types: linera_views::views::View<Context = #context>,)*
+                {
+                    fn drop(&mut self) {
+                        tracing::debug!("dropping view {} debug_id={}", stringify!(#struct_name), self.#name);
+                    }
+                }
+            });
+            continue;
+        }
         let test_flush_ident = format_ident!("deleted{}", idx);
         let idx_lit = syn::LitInt::new(&idx.to_string(), Span::call_site());
         let g = get_extended_entry(e.ty.clone());
-        name_quotes.push(quote! { #name });
         rollback_quotes.push(quote! { self.#name.rollback(); });
         flush_quotes.push(quote! { let #test_flush_ident = self.#name.flush(batch)?; });
         test_flush_quotes.push(quote! { #test_flush_ident });
@@ -107,8 +153,15 @@ fn generate_view_code(input: ItemStruct, root: bool) -> TokenStream2 {
         });
     }
 
-    let first_name_quote = name_quotes
-        .first()
+    let first_name_quote = input
+        .fields
+        .iter()
+        .filter(|field| !is_debug_id(field))
+        .map(|field| {
+            let name = field.ident.clone().unwrap();
+            quote! { #name }
+        })
+        .next()
         .expect("list of names should be non-empty");
 
     let load_metrics = if root && cfg!(feature = "metrics") {
@@ -128,11 +181,14 @@ fn generate_view_code(input: ItemStruct, root: bool) -> TokenStream2 {
     };
 
     quote! {
+        #(#drop_quotes)*
+
         impl #impl_generics linera_views::views::View for #struct_name #type_generics
         where
             #context: linera_views::context::Context,
             #(#input_constraints,)*
             #(#field_types: linera_views::views::View<Context = #context>,)*
+            #(#add_context_constraints,)*
         {
             const NUM_INIT_KEYS: usize = #(<#field_types as linera_views::views::View>::NUM_INIT_KEYS)+*;
 
@@ -188,6 +244,8 @@ fn generate_view_code(input: ItemStruct, root: bool) -> TokenStream2 {
             fn clear(&mut self) {
                 #(#clear_quotes)*
             }
+
+            #(#debug_id_quotes)*
         }
     }
 }
@@ -199,6 +257,17 @@ fn generate_root_view_code(input: ItemStruct) -> TokenStream2 {
         type_generics,
     } = Constraints::get(&input);
     let struct_name = &input.ident;
+
+    let attrs: StructAttrs = deluxe::parse_attributes(&input).unwrap();
+    let context = attrs.context.unwrap_or_else(|| {
+        let ident = &input
+            .generics
+            .type_params()
+            .next()
+            .expect("no `context` given and no type parameters")
+            .ident;
+        parse_quote! { #ident }
+    });
 
     let increment_counter = if cfg!(feature = "metrics") {
         quote! {
@@ -213,15 +282,25 @@ fn generate_root_view_code(input: ItemStruct) -> TokenStream2 {
         quote! {}
     };
 
+    let mut add_constraints = Vec::new();
+    let debug_field: Vec<_> = input.fields.iter().find(|field| is_debug_id(field)).map(|field| {
+        let name = field.ident.clone().unwrap();
+        add_constraints.push(quote! { #context: linera_views::context::Context });
+        add_constraints.push(quote! { #context::Extra: ExecutionRuntimeContext });
+        quote! { tracing::debug!("saving view {} debug_id={} chain_id={}", stringify!(#struct_name), self.#name, self.chain_id()); }
+    }).into_iter().collect();
+
     quote! {
         impl #impl_generics linera_views::views::RootView for #struct_name #type_generics
         where
             #(#input_constraints,)*
+            #(#add_constraints,)*
             Self: linera_views::views::View,
         {
             async fn save(&mut self) -> Result<(), linera_views::ViewError> {
                 use linera_views::{context::Context, batch::Batch, store::WritableKeyValueStore as _, views::View};
                 #increment_counter
+                #(#debug_field)*
                 let mut batch = Batch::new();
                 self.flush(&mut batch)?;
                 if !batch.is_empty() {
@@ -344,6 +423,10 @@ fn generate_clonable_view_code(input: ItemStruct) -> TokenStream2 {
     for field in &input.fields {
         let name = &field.ident;
         let ty = &field.ty;
+        if is_debug_id(field) {
+            clone_fields.push(quote! { #name: self.#name });
+            continue;
+        }
         clone_constraints.push(quote! { #ty: ClonableView });
         clone_fields.push(quote! { #name: self.#name.clone_unchecked()? });
     }

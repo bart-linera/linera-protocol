@@ -239,6 +239,9 @@ pub struct ChainStateView<C>
 where
     C: Clone + Context + Send + Sync + 'static,
 {
+    #[view(debug_id)]
+    #[graphql(skip)]
+    debug_id: usize,
     /// Execution state, including system and user applications.
     pub execution_state: ExecutionStateView<C>,
     /// Hash of the execution state.
