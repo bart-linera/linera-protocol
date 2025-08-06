@@ -121,4 +121,4 @@ pub use views::{
 };
 /// Re-exports used by the derive macros of this library.
 #[doc(hidden)]
-pub use {generic_array, sha3};
+pub use {generic_array, rand, sha3};

@@ -94,6 +94,11 @@ pub trait View: Sized {
         view.clear();
         Ok(view)
     }
+
+    /// Returns this instance's debug ID.
+    fn debug_id(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// A view that supports hashing its values.
