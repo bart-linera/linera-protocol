@@ -105,23 +105,44 @@ impl CacheEntry {
 /// This data structure is inspired by the crate `lru-cache` but was modified to support
 /// range deletions.
 struct LruPrefixCache {
+    debug_id: usize,
     map: BTreeMap<Vec<u8>, CacheEntry>,
     queue: LinkedHashMap<Vec<u8>, usize, RandomState>,
     config: StorageCacheConfig,
     total_size: usize,
     /// Whether we have exclusive R/W access to the keys under the root key of the store.
     has_exclusive_access: bool,
+    key: Vec<u8>,
+}
+
+impl Drop for LruPrefixCache {
+    fn drop(&mut self) {
+        tracing::debug!(debug_id=?self.debug_id, "dropping LruPrefixCache for key {}", hex::encode(&self.key));
+    }
 }
 
 impl LruPrefixCache {
     /// Creates an `LruPrefixCache`.
-    pub fn new(config: StorageCacheConfig, has_exclusive_access: bool) -> Self {
+    pub fn new(config: StorageCacheConfig, has_exclusive_access: bool, key: &[u8]) -> Self {
+        let debug_id = rand::thread_rng().gen();
+        tracing::debug!(
+            ?debug_id,
+            "creating new LruPrefixCache for key {}",
+            hex::encode(key)
+        );
+        tracing::debug!(
+            "backtrace: {:?}",
+            std::backtrace::Backtrace::force_capture()
+        );
+        use rand::Rng;
         Self {
+            debug_id,
             map: BTreeMap::new(),
             queue: LinkedHashMap::new(),
             config,
             total_size: 0,
             has_exclusive_access,
+            key: key.to_vec(),
         }
     }
 
@@ -258,12 +279,35 @@ pub struct LruCachingDatabase<D> {
 }
 
 /// A key-value store with added LRU caching.
-#[derive(Clone)]
 pub struct LruCachingStore<S> {
+    debug_id: usize,
     /// The inner store that is called by the LRU cache one
     store: S,
     /// The LRU cache of values.
     cache: Option<Arc<Mutex<LruPrefixCache>>>,
+}
+
+impl<S: Clone> Clone for LruCachingStore<S> {
+    fn clone(&self) -> Self {
+        use rand::Rng;
+        let debug_id = rand::thread_rng().gen();
+        tracing::debug!(
+            "cloning LruCachingStore original_id={}, debug_id={}, cache_debug_id={:?}",
+            self.debug_id,
+            debug_id,
+            self.cache.as_ref().map(|c| c.lock().unwrap().debug_id),
+        );
+        tracing::debug!(
+            "LruCachingStore::clone backtrace debug_id={}: {:?}",
+            debug_id,
+            std::backtrace::Backtrace::force_capture()
+        );
+        Self {
+            debug_id,
+            store: self.store.clone(),
+            cache: self.cache.clone(),
+        }
+    }
 }
 
 impl<D> WithError for LruCachingDatabase<D>
@@ -280,6 +324,12 @@ where
     type Error = S::Error;
 }
 
+impl<K> Drop for LruCachingStore<K> {
+    fn drop(&mut self) {
+        tracing::debug!(debug_id=?self.debug_id, "dropping LruCachingStore, cache_debug_id={:?}", self.cache.as_ref().map(|c| c.lock().unwrap().debug_id));
+    }
+}
+
 impl<K> ReadableKeyValueStore for LruCachingStore<K>
 where
     K: ReadableKeyValueStore,
@@ -292,7 +342,7 @@ where
     }
 
     async fn read_value_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-        tracing::debug!("cache read (read_value_bytes)");
+        tracing::debug!(debug_id=?self.debug_id, "cache read (read_value_bytes)");
         let Some(cache) = &self.cache else {
             return self.store.read_value_bytes(key).await;
         };
@@ -312,14 +362,14 @@ where
             .with_label_values(&[])
             .inc();
         let value = self.store.read_value_bytes(key).await?;
-        tracing::debug!("storage read (read_value_bytes)");
+        tracing::debug!(debug_id=?self.debug_id, "storage read (read_value_bytes)");
         let mut cache = cache.lock().unwrap();
         cache.insert_read_value(key.to_vec(), &value);
         Ok(value)
     }
 
     async fn contains_key(&self, key: &[u8]) -> Result<bool, Self::Error> {
-        tracing::debug!("cache read (contains_key)");
+        tracing::debug!(debug_id=?self.debug_id, "cache read (contains_key)");
         let Some(cache) = &self.cache else {
             return self.store.contains_key(key).await;
         };
@@ -338,14 +388,14 @@ where
             .with_label_values(&[])
             .inc();
         let result = self.store.contains_key(key).await?;
-        tracing::debug!("storage read (contains_key)");
+        tracing::debug!(debug_id=?self.debug_id, "storage read (contains_key)");
         let mut cache = cache.lock().unwrap();
         cache.insert_contains_key(key.to_vec(), result);
         Ok(result)
     }
 
     async fn contains_keys(&self, keys: Vec<Vec<u8>>) -> Result<Vec<bool>, Self::Error> {
-        tracing::debug!("cache read (contains_keys)");
+        tracing::debug!(debug_id=?self.debug_id, "cache read (contains_keys)");
         let Some(cache) = &self.cache else {
             return self.store.contains_keys(keys).await;
         };
@@ -374,7 +424,7 @@ where
         }
         if !key_requests.is_empty() {
             let key_results = self.store.contains_keys(key_requests.clone()).await?;
-            tracing::debug!("storage read (contains_keys)");
+            tracing::debug!(debug_id=?self.debug_id, "storage read (contains_keys)");
             let mut cache = cache.lock().unwrap();
             for ((index, result), key) in indices.into_iter().zip(key_results).zip(key_requests) {
                 results[index] = result;
@@ -388,7 +438,7 @@ where
         &self,
         keys: Vec<Vec<u8>>,
     ) -> Result<Vec<Option<Vec<u8>>>, Self::Error> {
-        tracing::debug!("cache read (read_multi_values_bytes)");
+        tracing::debug!(debug_id=?self.debug_id, "cache read (read_multi_values_bytes)");
         let Some(cache) = &self.cache else {
             return self.store.read_multi_values_bytes(keys).await;
         };
@@ -421,7 +471,7 @@ where
                 .store
                 .read_multi_values_bytes(miss_keys.clone())
                 .await?;
-            tracing::debug!("storage read (read_multi_values_bytes)");
+            tracing::debug!(debug_id=?self.debug_id, "storage read (read_multi_values_bytes)");
             let mut cache = cache.lock().unwrap();
             for (i, (key, value)) in cache_miss_indices
                 .into_iter()
@@ -476,9 +526,9 @@ where
                 }
             }
         }
-        tracing::debug!("write_batch: cache written");
+        tracing::debug!(debug_id=?self.debug_id, "write_batch: cache written");
         let result = self.store.write_batch(batch).await;
-        tracing::debug!("write_batch: storage written");
+        tracing::debug!(debug_id=?self.debug_id, "write_batch: storage written");
         result
     }
 
@@ -522,6 +572,7 @@ where
             store,
             self.config.clone(),
             /* has_exclusive_access */ false,
+            root_key,
         );
         Ok(store)
     }
@@ -532,6 +583,7 @@ where
             store,
             self.config.clone(),
             /* has_exclusive_access */ true,
+            root_key,
         );
         Ok(store)
     }
@@ -566,7 +618,12 @@ where
 
 impl<S> LruCachingStore<S> {
     /// Creates a new key-value store that provides LRU caching at top of the given store.
-    pub fn new(store: S, config: StorageCacheConfig, has_exclusive_access: bool) -> Self {
+    pub fn new(
+        store: S,
+        config: StorageCacheConfig,
+        has_exclusive_access: bool,
+        key: &[u8],
+    ) -> Self {
         let cache = {
             if config.max_cache_entries == 0 {
                 None
@@ -574,10 +631,22 @@ impl<S> LruCachingStore<S> {
                 Some(Arc::new(Mutex::new(LruPrefixCache::new(
                     config,
                     has_exclusive_access,
+                    key,
                 ))))
             }
         };
-        Self { store, cache }
+        use rand::Rng;
+        let debug_id = rand::thread_rng().gen();
+        tracing::debug!(
+            "creating LruCachingStore debug_id={}, cache_debug_id={:?}",
+            debug_id,
+            cache.as_ref().map(|c| c.lock().unwrap().debug_id)
+        );
+        Self {
+            store,
+            cache,
+            debug_id,
+        }
     }
 }
 

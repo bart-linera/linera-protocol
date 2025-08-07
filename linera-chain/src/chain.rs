@@ -242,10 +242,11 @@ where
     #[view(debug_id)]
     #[graphql(skip)]
     debug_id: usize,
-    /// Execution state, including system and user applications.
-    pub execution_state: ExecutionStateView<C>,
     /// Hash of the execution state.
     pub execution_state_hash: RegisterView<C, Option<CryptoHash>>,
+
+    /// Execution state, including system and user applications.
+    pub execution_state: ExecutionStateView<C>,
 
     /// Block-chaining state.
     pub tip_state: RegisterView<C, ChainTipState>,

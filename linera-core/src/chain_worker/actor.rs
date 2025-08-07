@@ -305,7 +305,7 @@ where
             tracing::Span,
         )>,
     ) -> Result<(), WorkerError> {
-        trace!("Starting `ChainWorkerActor`");
+        debug!("Starting `ChainWorkerActor`");
 
         while let Some((request, span)) = incoming_requests.recv().await {
             let (service_runtime_thread, service_runtime_endpoint) = {

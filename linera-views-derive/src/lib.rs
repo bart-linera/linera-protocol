@@ -424,7 +424,14 @@ fn generate_clonable_view_code(input: ItemStruct) -> TokenStream2 {
         let name = &field.ident;
         let ty = &field.ty;
         if is_debug_id(field) {
-            clone_fields.push(quote! { #name: self.#name });
+            clone_fields.push(quote! { #name: {
+                use linera_views::rand::Rng;
+                let mut rng = linera_views::rand::thread_rng();
+                let #name = rng.gen();
+                tracing::debug!("cloning view {} source_id={} debug_id={} chain_id={}", stringify!(#struct_name), self.#name, #name, self.chain_id());
+                #name
+            } });
+            clone_constraints.push(quote! { C::Extra: ExecutionRuntimeContext });
             continue;
         }
         clone_constraints.push(quote! { #ty: ClonableView });
