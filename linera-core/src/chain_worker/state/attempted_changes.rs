@@ -554,6 +554,7 @@ where
             return Ok(None);
         }
         // Save the chain.
+        tracing::debug!(chain_id=%self.state.chain.chain_id(), "saving the chain");
         self.save().await?;
         Ok(Some(last_updated_height))
     }

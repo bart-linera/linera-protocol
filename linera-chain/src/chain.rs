@@ -497,6 +497,7 @@ where
         let stream = stream::iter(pairs)
             .map(|(origin, inbox)| async move {
                 if let Some(bundle) = inbox.removed_bundles.front().await? {
+                    tracing::debug!(?bundle, "a bundle is present in removed_bundles");
                     return Err(ChainError::MissingCrossChainUpdate {
                         chain_id,
                         origin,
@@ -581,6 +582,12 @@ where
             .observe(self.inboxes.count().await? as f64);
         let entry = BundleInInbox::new(*origin, &bundle);
         let skippable = bundle.is_skippable();
+        tracing::debug!(
+            chain_id=?self.chain_id(),
+            ?origin,
+            height=?bundle.height,
+            "adding bundle to inbox"
+        );
         let newly_added = inbox
             .add_bundle(bundle)
             .await
@@ -658,7 +665,7 @@ where
         let inboxes = self.inboxes.try_load_entries_mut(origins).await?;
         let mut removed_unskippable = HashSet::new();
         for ((origin, bundles), mut inbox) in bundles_by_origin.into_iter().zip(inboxes) {
-            tracing::trace!(
+            tracing::debug!(
                 "Removing {:?} from {chain_id:.8}'s inbox for {origin:}",
                 bundles
                     .iter()

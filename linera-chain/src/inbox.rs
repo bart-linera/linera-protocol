@@ -289,6 +289,7 @@ where
                             bundle,
                         }
                     );
+                    tracing::trace!("Adding previously received bundle {:?}", bundle);
                     self.removed_bundles.delete_front();
                     #[cfg(with_metrics)]
                     metrics::REMOVED_BUNDLES
@@ -297,6 +298,7 @@ where
                 } else {
                     // The receiver has already executed a later bundle from the same
                     // sender ahead of time so we should skip this one.
+                    tracing::trace!("Skipping bundle {:?}", bundle);
                     ensure!(
                         cursor < Cursor::from(&previous_bundle) && bundle.is_skippable(),
                         InboxError::UnexpectedBundle {
@@ -309,6 +311,7 @@ where
             }
             None => {
                 // Otherwise, schedule the messages for execution.
+                tracing::trace!("Adding a new bundle {:?}", bundle);
                 self.added_bundles.push_back(bundle);
                 #[cfg(with_metrics)]
                 metrics::INBOX_SIZE

@@ -292,6 +292,7 @@ where
     }
 
     async fn read_value_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+        tracing::debug!("cache read (read_value_bytes)");
         let Some(cache) = &self.cache else {
             return self.store.read_value_bytes(key).await;
         };
@@ -311,12 +312,14 @@ where
             .with_label_values(&[])
             .inc();
         let value = self.store.read_value_bytes(key).await?;
+        tracing::debug!("storage read (read_value_bytes)");
         let mut cache = cache.lock().unwrap();
         cache.insert_read_value(key.to_vec(), &value);
         Ok(value)
     }
 
     async fn contains_key(&self, key: &[u8]) -> Result<bool, Self::Error> {
+        tracing::debug!("cache read (contains_key)");
         let Some(cache) = &self.cache else {
             return self.store.contains_key(key).await;
         };
@@ -335,12 +338,14 @@ where
             .with_label_values(&[])
             .inc();
         let result = self.store.contains_key(key).await?;
+        tracing::debug!("storage read (contains_key)");
         let mut cache = cache.lock().unwrap();
         cache.insert_contains_key(key.to_vec(), result);
         Ok(result)
     }
 
     async fn contains_keys(&self, keys: Vec<Vec<u8>>) -> Result<Vec<bool>, Self::Error> {
+        tracing::debug!("cache read (contains_keys)");
         let Some(cache) = &self.cache else {
             return self.store.contains_keys(keys).await;
         };
@@ -369,6 +374,7 @@ where
         }
         if !key_requests.is_empty() {
             let key_results = self.store.contains_keys(key_requests.clone()).await?;
+            tracing::debug!("storage read (contains_keys)");
             let mut cache = cache.lock().unwrap();
             for ((index, result), key) in indices.into_iter().zip(key_results).zip(key_requests) {
                 results[index] = result;
@@ -382,6 +388,7 @@ where
         &self,
         keys: Vec<Vec<u8>>,
     ) -> Result<Vec<Option<Vec<u8>>>, Self::Error> {
+        tracing::debug!("cache read (read_multi_values_bytes)");
         let Some(cache) = &self.cache else {
             return self.store.read_multi_values_bytes(keys).await;
         };
@@ -414,6 +421,7 @@ where
                 .store
                 .read_multi_values_bytes(miss_keys.clone())
                 .await?;
+            tracing::debug!("storage read (read_multi_values_bytes)");
             let mut cache = cache.lock().unwrap();
             for (i, (key, value)) in cache_miss_indices
                 .into_iter()
@@ -468,7 +476,10 @@ where
                 }
             }
         }
-        self.store.write_batch(batch).await
+        tracing::debug!("write_batch: cache written");
+        let result = self.store.write_batch(batch).await;
+        tracing::debug!("write_batch: storage written");
+        result
     }
 
     async fn clear_journal(&self) -> Result<(), Self::Error> {

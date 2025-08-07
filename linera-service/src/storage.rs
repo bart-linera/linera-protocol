@@ -59,7 +59,12 @@ pub struct CommonStorageOptions {
     pub storage_max_entry_size: usize,
 
     /// The maximal number of entries in the storage cache.
-    #[arg(long, default_value = "1000", global = true)]
+    #[arg(
+        long,
+        env = "LINERA_STORAGE_MAX_CACHE_ENTRIES",
+        default_value = "1000",
+        global = true
+    )]
     pub storage_max_cache_entries: usize,
 
     /// The replication factor for the keyspace
