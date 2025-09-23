@@ -282,6 +282,7 @@ where
                 if let Some(outbox) = chain.outboxes.try_load_entry(&receiver_id).await? {
                     next_height = next_height.max(*outbox.next_height_to_schedule.get());
                 }
+                self.node.state.stop_worker(*chain_id);
                 Ok::<_, LocalNodeError>((*chain_id, next_height))
             }));
         futures.try_collect().await

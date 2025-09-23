@@ -41,6 +41,7 @@ use crate::{
     join_set_ext::{JoinSet, JoinSetExt},
     notifier::Notifier,
     value_cache::ValueCache,
+    TaskHandle,
 };
 
 const BLOCK_CACHE_SIZE: usize = 5_000;
@@ -300,7 +301,7 @@ where
     /// The set of spawned [`ChainWorkerActor`] tasks.
     chain_worker_tasks: Arc<Mutex<JoinSet>>,
     /// The cache of running [`ChainWorkerActor`]s.
-    chain_workers: Arc<Mutex<BTreeMap<ChainId, ChainActorEndpoint<StorageClient>>>>,
+    chain_workers: Arc<Mutex<BTreeMap<ChainId, ChainWorker<StorageClient>>>>,
 }
 
 impl<StorageClient> Clone for WorkerState<StorageClient>
@@ -327,6 +328,11 @@ type ChainActorEndpoint<StorageClient> = mpsc::UnboundedSender<(
     ChainWorkerRequest<<StorageClient as Storage>::Context>,
     tracing::Span,
 )>;
+
+struct ChainWorker<StorageClient: Storage> {
+    endpoint: ChainActorEndpoint<StorageClient>,
+    task_handle: TaskHandle<()>,
+}
 
 pub(crate) type DeliveryNotifiers = HashMap<ChainId, DeliveryNotifier>;
 
@@ -776,10 +782,18 @@ where
                 receiver,
             );
 
-            self.chain_worker_tasks
+            let task_handle = self
+                .chain_worker_tasks
                 .lock()
                 .unwrap()
                 .spawn_task(actor_task);
+
+            let worker = ChainWorker {
+                endpoint: sender.clone(),
+                task_handle,
+            };
+
+            self.chain_workers.lock().unwrap().insert(chain_id, worker);
         }
 
         Ok(sender)
@@ -803,14 +817,19 @@ where
             mpsc::UnboundedReceiver<(ChainWorkerRequest<StorageClient::Context>, tracing::Span)>,
         >,
     )> {
-        let mut chain_workers = self.chain_workers.lock().unwrap();
-
-        if let Some(endpoint) = chain_workers.get(&chain_id) {
-            Some((endpoint.clone(), None))
+        if let Some(worker) = self.chain_workers.lock().unwrap().get(&chain_id) {
+            Some((worker.endpoint.clone(), None))
         } else {
             let (sender, receiver) = mpsc::unbounded_channel();
-            chain_workers.insert(chain_id, sender.clone());
             Some((sender, Some(receiver)))
+        }
+    }
+
+    /// Removes a ChainWorker from the cache, if it exists, and stops it.
+    #[instrument(level = "trace", skip(self))]
+    pub(crate) fn stop_worker(&self, chain_id: ChainId) {
+        if let Some(worker) = self.chain_workers.lock().unwrap().remove(&chain_id) {
+            worker.task_handle.abort();
         }
     }
 
