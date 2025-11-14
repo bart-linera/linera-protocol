@@ -76,19 +76,20 @@ pub struct TransactionOutcome {
 }
 
 impl TransactionTracker {
-    pub fn new(
+    pub fn new<'a, I>(
         local_time: Timestamp,
         transaction_index: u32,
         next_application_index: u32,
         next_chain_index: u32,
         oracle_responses: Option<Vec<OracleResponse>>,
-        blobs: &[Vec<Blob>],
-    ) -> Self {
+        blobs: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = &'a Blob>,
+    {
         let mut previously_created_blobs = BTreeMap::new();
-        for tx_blobs in blobs {
-            for blob in tx_blobs {
-                previously_created_blobs.insert(blob.id(), blob.content().clone());
-            }
+        for blob in blobs {
+            previously_created_blobs.insert(blob.id(), blob.content().clone());
         }
         TransactionTracker {
             local_time,
